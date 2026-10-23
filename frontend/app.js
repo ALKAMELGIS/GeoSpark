@@ -8,8 +8,63 @@ const color = (i) => PALETTE[i % PALETTE.length];
 
 const state = { models: [], rasters: [], raster: null, model: null, job: null, fc: null, hidden: new Set(), poll: null };
 
+// ------------------------------------------------------------------ server connection
+
+const OFFLINE_HELP = "Start the server with run.bat (double-click) or run.ps1 in the AI_Platfrom folder, keep its window open, and open the address it prints.";
+let offlineTimer = null;
+
+function showOffline(msg) {
+  const el = $("offline");
+  el.querySelector(".msg").textContent = msg;
+  el.classList.remove("hidden");
+  $("health").textContent = "API offline";
+  $("health").classList.remove("ok");
+  if (!offlineTimer && location.protocol !== "file:") offlineTimer = setInterval(checkServer, 3000);
+}
+
+async function checkServer() {
+  try {
+    const r = await fetch("/api/health", { cache: "no-store" });
+    if (!r.ok) throw new Error();
+    clearInterval(offlineTimer);
+    offlineTimer = null;
+    $("offline").classList.add("hidden");
+    boot();  // reload models and rasters after the server comes back
+  } catch (_) { /* still offline */ }
+}
+
+$("offlineRetry").addEventListener("click", checkServer);
+
+let ourServer = null;
+async function isOurServer() {
+  if (ourServer !== null) return ourServer;
+  try {
+    const h = await (await fetch("/api/health", { cache: "no-store" })).json();
+    ourServer = h.status === "ok" && "providers" in h;
+  } catch (_) {
+    ourServer = false;
+  }
+  return ourServer;
+}
+
+// "Failed to fetch" is the browser's message when no server answers: replace it with what to do.
+async function safeFetch(path, opts) {
+  try {
+    return await fetch(path, opts);
+  } catch (err) {
+    if (err.name === "AbortError") throw err;
+    const msg = `Cannot reach the GeoAI server at ${location.origin}. ${OFFLINE_HELP}`;
+    showOffline(msg);
+    throw new Error(`Cannot reach the GeoAI server — is run.bat / run.ps1 running?`);
+  }
+}
+
 async function api(path, opts = {}) {
-  const r = await fetch(path, opts);
+  const r = await safeFetch(path, opts);
+  if (r.status === 404 && path.startsWith("/api/") && !(await isOurServer())) {
+    showOffline(`${location.origin} is answered by a different program, not the GeoAI server. ${OFFLINE_HELP}`);
+    throw new Error("Another program is using this address.");
+  }
   if (!r.ok) {
     let msg = r.statusText;
     try { msg = (await r.json()).detail || msg; } catch (_) { /* not JSON */ }
@@ -477,16 +532,22 @@ $("modeAnnotate").addEventListener("click", () => setMode("annotate"));
 
 // ------------------------------------------------------------------ boot
 
-(async () => {
+async function boot() {
+  if (location.protocol === "file:") {
+    showOffline(`This page was opened as a file, so it cannot talk to the GeoAI server. ${OFFLINE_HELP}`);
+    return;
+  }
   try {
     const h = await api("/api/health");
     const gpu = h.providers.some((p) => /CUDA|Dml|TensorRT|ROCm|CoreML|OpenVINO/.test(p));
     $("health").textContent = `ONNX Runtime · ${gpu ? "GPU" : "CPU"}`;
     $("health").classList.add("ok");
-  } catch (_) {
-    $("health").textContent = "API offline";
+    await loadModels(state.model?.id);
+    await loadRasters(state.raster?.id);
+    renderJobs();
+  } catch (err) {
+    console.warn("[boot]", err.message);  // the offline banner explains what to do
   }
-  await loadModels();
-  await loadRasters();
-  renderJobs();
-})();
+}
+
+boot();

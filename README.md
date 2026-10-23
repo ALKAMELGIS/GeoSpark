@@ -24,11 +24,13 @@ as a browser-based platform. See [docs/PHASES.md](docs/PHASES.md) for the analys
 
 ## Quick start (Windows)
 
+Double-click **`run.bat`** in the `AI_Platfrom` folder (or run `C:\path\to\AI_Platfrom\run.ps1` from any
+directory). The first run creates the Python environment. The launcher skips ports already used by other
+programs (Docker often holds 8000), prints the address, and opens the browser. Keep its window open while
+you use the app: closing it stops the server, and the page then shows "Server not reachable".
+
 ```powershell
-python -m venv .venv
-.venv\Scripts\pip install -r backend\requirements.txt
-.venv\Scripts\python scripts\export_models.py yolo26s-obb-dota2   # 39 MB, MIT — built-in aerial model
-.\run.ps1                                                          # http://127.0.0.1:8000
+.venv\Scripts\python scripts\export_models.py yolo26s-obb-dota2   # 39 MB built-in aerial model
 ```
 
 Then drop a GeoTIFF into the sidebar, choose a model and classes, and press **Run detection**.

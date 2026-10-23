@@ -819,8 +819,8 @@
       val_ratio: +$("valRatio").value, image_format: $("imgFormat").value, include_empty: $("includeEmpty").checked };
     setStatus(st, "Building dataset…");
     try {
-      const r = await fetch(`/api/rasters/${A.raster.id}/annotations/export`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-      if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+      const r = await safeFetch(`/api/rasters/${A.raster.id}/annotations/export`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
       const blob = await r.blob();
       const name = (r.headers.get("content-disposition") || "").match(/filename="?([^";]+)/)?.[1] || "dataset.zip";
       const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(blob), download: name });
