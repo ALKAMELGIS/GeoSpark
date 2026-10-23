@@ -1,0 +1,73 @@
+{
+  "models": [
+    {
+      "id": "yolo26s-obb-dota2",
+      "name": "Aerial objects — YOLO26s-OBB (DOTA v2)",
+      "task": "obb",
+      "file": "yolo26s-obb-dota2.onnx",
+      "imgsz": 1024,
+      "category": "aerial",
+      "description": "Oriented bounding boxes for 18 DOTA v2.0 classes: aircraft, ships, storage tanks, vehicles, bridges, harbors, airports, helipads and more.",
+      "names": ["plane", "ship", "storage-tank", "baseball-diamond", "tennis-court", "basketball-court", "ground-track-field", "harbor", "bridge", "large-vehicle", "small-vehicle", "helicopter", "roundabout", "soccer-ball-field", "swimming-pool", "container-crane", "airport", "helipad"],
+      "license": "Weights: AGPL-3.0 (Ultralytics, per embedded ONNX metadata). Repository code: MIT (JustinVladut/YOLO26-DOTA-v2). DOTA dataset terms apply.",
+      "source": "https://github.com/JustinVladut/YOLO26-DOTA-v2",
+      "download_url": "https://github.com/JustinVladut/YOLO26-DOTA-v2/releases/download/v1.0/best.onnx"
+    },
+    {
+      "id": "yolo11n-obb-dota1",
+      "name": "Aerial objects — YOLO11n-OBB (DOTA v1, lightweight)",
+      "task": "obb",
+      "file": "yolo11n-obb.onnx",
+      "imgsz": 1024,
+      "category": "aerial",
+      "description": "Ultralytics official 15-class DOTA v1 OBB model. Fast CPU option. Export with scripts/export_models.py.",
+      "names": ["plane", "ship", "storage tank", "baseball diamond", "tennis court", "basketball court", "ground track field", "harbor", "bridge", "large vehicle", "small vehicle", "helicopter", "roundabout", "soccer ball field", "swimming pool"],
+      "license": "AGPL-3.0 (Ultralytics) — enterprise license required for closed-source commercial use",
+      "source": "https://docs.ultralytics.com/tasks/obb/"
+    },
+    {
+      "id": "tree-yolov8",
+      "name": "Trees — YOLOv8 detector (TreeSensing)",
+      "task": "detect",
+      "file": "tree-yolov8.onnx",
+      "imgsz": 640,
+      "category": "trees",
+      "description": "Single-class tree detection and counting in aerial imagery.",
+      "names": ["tree"],
+      "license": "No license declared upstream: all rights reserved by the author. Obtain permission before use or redistribution. Training data: Roboflow tree-counting (CC BY 4.0).",
+      "source": "https://github.com/flyingvaibhav/TreeSensing"
+    },
+    {
+      "id": "building-yolov8n-seg",
+      "name": "Buildings — YOLOv8n instance segmentation",
+      "task": "segment",
+      "file": "building-yolov8n-seg.onnx",
+      "imgsz": 640,
+      "category": "buildings",
+      "description": "Building footprint instance segmentation for high-resolution satellite imagery.",
+      "names": ["building"],
+      "license": "Ultralytics YOLOv8 (AGPL-3.0); verify model-card terms of keremberke/yolov8n-building-segmentation",
+      "source": "https://huggingface.co/keremberke/yolov8n-building-segmentation"
+    },
+    {
+      "id": "sam2-hiera-tiny",
+      "name": "SAM 2 — interactive point prompts",
+      "task": "sam2",
+      "category": "segment-anything",
+      "description": "Positive/negative point-prompt segmentation. Planned for Phase 3.",
+      "license": "Apache-2.0 (Meta AI)",
+      "source": "https://github.com/facebookresearch/sam2",
+      "planned": true
+    },
+    {
+      "id": "sam3",
+      "name": "SAM 3 — text-prompted segmentation",
+      "task": "sam3",
+      "category": "segment-anything",
+      "description": "Text-prompt object detection and instance segmentation. Optional, planned for Phase 4.",
+      "license": "Meta SAM License",
+      "source": "https://github.com/facebookresearch/sam3",
+      "planned": true
+    }
+  ]
+}

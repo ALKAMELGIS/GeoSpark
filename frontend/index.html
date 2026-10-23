@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI Platform — GeoAI</title>
+  <link rel="stylesheet" href="vendor/maplibre-gl/maplibre-gl.css" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="logo">◈</span> AI Platform <span class="muted">GeoAI</span></div>
+    <div class="topbar-right">
+      <label class="inline">Basemap
+        <select id="basemap">
+          <option value="esri">Esri World Imagery</option>
+          <option value="osm">OpenStreetMap</option>
+          <option value="none">None (offline)</option>
+        </select>
+      </label>
+      <span id="health" class="pill">…</span>
+      <button id="aboutBtn" class="ghost">Licenses</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <aside class="sidebar">
+      <section class="card">
+        <h2><span class="step">1</span> Imagery</h2>
+        <label id="dropzone" class="dropzone">
+          <input id="rasterFile" type="file" accept=".tif,.tiff,.jp2,.img,.vrt" hidden />
+          <strong>Drop a GeoTIFF</strong> or click to browse
+          <small>Aerial / satellite imagery, any CRS</small>
+        </label>
+        <div id="uploadStatus" class="status"></div>
+        <select id="rasterSelect"><option value="">— no imagery loaded —</option></select>
+        <div id="rasterInfo" class="info"></div>
+        <div id="bandRow" class="band-row hidden">
+          <span>Bands</span>
+          <select id="bandR"></select><select id="bandG"></select><select id="bandB"></select>
+        </div>
+        <label class="slider-row">Overlay opacity <input id="opacity" type="range" min="0" max="1" step="0.05" value="1" /></label>
+      </section>
+
+      <section class="card">
+        <h2><span class="step">2</span> GeoAI model</h2>
+        <select id="modelSelect"></select>
+        <div id="modelInfo" class="info"></div>
+        <details>
+          <summary>Add custom ONNX model</summary>
+          <form id="modelForm" class="stack">
+            <input type="file" name="file" accept=".onnx" required />
+            <input type="text" name="name" placeholder="Display name (optional)" />
+            <select name="task">
+              <option value="">Task from model metadata</option>
+              <option value="obb">Oriented boxes (OBB)</option>
+              <option value="detect">Boxes (detect)</option>
+              <option value="segment">Instance segmentation</option>
+            </select>
+            <input type="text" name="names" placeholder="Class names, comma-separated (if not embedded)" />
+            <button type="submit">Register model</button>
+          </form>
+        </details>
+      </section>
+
+      <section class="card">
+        <h2><span class="step">3</span> Classes &amp; parameters</h2>
+        <div class="class-tools"><button class="link" id="allClasses">All</button> · <button class="link" id="noClasses">None</button></div>
+        <div id="classList" class="class-list"></div>
+        <label class="slider-row">Confidence <output id="confOut">0.25</output><input id="conf" type="range" min="0.05" max="0.95" step="0.05" value="0.25" /></label>
+        <label class="slider-row">NMS IoU <output id="iouOut">0.45</output><input id="iou" type="range" min="0.1" max="0.9" step="0.05" value="0.45" /></label>
+        <label class="slider-row">Tile overlap <output id="overlapOut">20%</output><input id="overlap" type="range" min="0" max="0.5" step="0.05" value="0.2" /></label>
+        <label class="slider-row" title="Zoom imagery before inference. Raise it when objects are smaller in your imagery than in the model's training data.">Resample <output id="scaleOut">1.0×</output><input id="scale" type="range" min="0.5" max="4" step="0.25" value="1" /></label>
+        <label class="check"><input id="agnostic" type="checkbox" /> Class-agnostic NMS</label>
+        <div class="run-row">
+          <button id="runBtn" class="primary" disabled>Run detection</button>
+          <button id="cancelBtn" class="ghost hidden">Cancel</button>
+        </div>
+        <div id="progressWrap" class="progress hidden"><div id="progressBar"></div></div>
+        <div id="jobStatus" class="status"></div>
+      </section>
+
+      <section class="card">
+        <h2><span class="step">4</span> Results</h2>
+        <div id="summary" class="summary muted">Run a model to create a detection layer.</div>
+        <div id="exportRow" class="export-row hidden">
+          <a id="exportGeojson" class="button">GeoJSON</a>
+          <a id="exportCsv" class="button">CSV (WKT)</a>
+          <button id="tableBtn" class="ghost">Attribute table</button>
+        </div>
+        <label class="check hidden" id="labelRow"><input id="showLabels" type="checkbox" /> Show labels</label>
+        <h3>History</h3>
+        <ul id="jobList" class="job-list"></ul>
+      </section>
+    </aside>
+
+    <div class="map-wrap">
+      <div id="map"></div>
+      <div id="tablePanel" class="table-panel hidden">
+        <div class="table-head"><strong>Attributes</strong> <span id="tableCount" class="muted"></span><button id="closeTable" class="ghost">✕</button></div>
+        <div class="table-scroll"><table id="attrTable"></table></div>
+      </div>
+    </div>
+  </main>
+
+  <dialog id="about">
+    <h2>Licensing &amp; attribution</h2>
+    <p>This platform runs third-party AI models locally with <a href="https://onnxruntime.ai/" target="_blank">ONNX Runtime</a>. Each model, framework and dataset keeps its own license.</p>
+    <ul>
+      <li><b>Ultralytics YOLO</b> — AGPL-3.0 (enterprise licensing for closed commercial use).</li>
+      <li><b>YOLO26-DOTA-v2</b> by JustinVladut — MIT. <b>DOTA</b> dataset — academic-use terms.</li>
+      <li><b>TreeSensing</b> by flyingvaibhav — no license declared; obtain permission before use.</li>
+      <li><b>YOLOv8n building segmentation</b> by keremberke — verify model-card terms.</li>
+      <li><b>SAM 2</b> — Apache-2.0. <b>SAM 3</b> — Meta SAM License.</li>
+      <li><b>MapLibre GL JS</b> — BSD-3-Clause. Basemaps © Esri, © OpenStreetMap contributors.</li>
+    </ul>
+    <p class="muted">Feature parity reference: EarthMapper by Ali Alkazraji. Acknowledgments do not imply endorsement. Verify the provenance and redistribution rights of any model weights you supply.</p>
+    <form method="dialog"><button class="primary">Close</button></form>
+  </dialog>
+
+  <script src="vendor/maplibre-gl/maplibre-gl.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
