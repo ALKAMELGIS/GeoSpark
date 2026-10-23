@@ -109,3 +109,60 @@ dialog::backdrop { background: rgba(0,0,0,.6); }
   .map-wrap { min-height: 50%; }
   .topbar-right .inline { display: none; }
 }
+
+/* ---- mode switch, CRS panel ---- */
+:root { --warn: #f2b84b; --info: #4c9aff; }
+.segmented { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.segmented button { border: none; border-radius: 0; background: transparent; padding: 6px 14px; color: var(--muted); }
+.segmented button + button { border-left: 1px solid var(--border); }
+.segmented button.active { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+.segmented.wide { display: flex; }
+.segmented.wide button { flex: 1; padding: 6px 4px; font-size: 12px; }
+.panel-stack { display: flex; flex-direction: column; gap: 12px; }
+.crs { border: 1px solid var(--border); border-radius: 6px; padding: 8px; font-size: 12px; display: flex; flex-direction: column; gap: 6px; }
+.crs b { font-weight: 500; }
+.warnings { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.warnings li { padding: 4px 8px; border-radius: 4px; border-left: 3px solid var(--warn); background: rgba(242,184,75,.08); line-height: 1.4; }
+.warnings li.error { border-color: var(--danger); background: rgba(229,83,75,.1); }
+.warnings li.info { border-color: var(--info); background: rgba(76,154,255,.08); }
+.crs-form, .class-form { display: flex; gap: 6px; }
+.crs-form input { flex: 1; }
+.class-form input[type=text] { flex: 1; }
+.class-form input[type=color] { width: 34px; padding: 0; height: 32px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); }
+
+/* ---- annotation sidebar ---- */
+.ann-classes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; max-height: 240px; overflow-y: auto; }
+.ann-classes li { display: grid; grid-template-columns: 18px 22px 1fr auto auto; gap: 6px; align-items: center; padding: 4px 6px;
+  border: 1px solid transparent; border-radius: 6px; cursor: pointer; font-size: 13px; }
+.ann-classes li:hover { background: var(--bg); }
+.ann-classes li.active { border-color: var(--accent); background: rgba(63,182,139,.08); }
+.ann-classes .key { color: var(--muted); font-size: 11px; text-align: center; }
+.ann-classes input[type=color] { width: 20px; height: 20px; padding: 0; border: none; background: none; cursor: pointer; }
+.ann-classes .count { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12px; }
+.ann-classes .del { background: none; border: none; color: var(--muted); padding: 0 2px; }
+.ann-classes .del:hover { color: var(--danger); }
+.ann-classes .cname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.radio-row { display: flex; gap: 12px; font-size: 12px; color: var(--muted); }
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.mini { display: flex; flex-direction: column; gap: 2px; font-size: 11px; color: var(--muted); }
+.mini input, .mini select { padding: 4px 6px; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; font: inherit; }
+
+/* ---- map toolbar ---- */
+.ann-toolbar { position: absolute; top: 10px; left: 10px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 6px; box-shadow: 0 4px 16px rgba(0,0,0,.35);
+  max-width: calc(100% - 70px); z-index: 2; }
+.tool-group { display: flex; gap: 2px; }
+.tool-group + .tool-group { padding-left: 8px; border-left: 1px solid var(--border); }
+.ann-toolbar button { min-width: 32px; height: 32px; padding: 0 8px; font-size: 13px; background: transparent; border-color: transparent; }
+.ann-toolbar button:hover { border-color: var(--border); }
+.ann-toolbar button.active { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.ann-toolbar button kbd { font-size: 10px; opacity: .6; margin-left: 4px; font-family: inherit; }
+.brush { align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.brush input { width: 90px; accent-color: var(--accent); }
+.save-state { font-size: 11px; color: var(--muted); padding: 0 6px; }
+.save-state.dirty { color: var(--warn); }
+.save-state.error { color: var(--danger); }
+.ann-help { position: absolute; left: 10px; bottom: 30px; background: rgba(15,20,25,.85); border: 1px solid var(--border); border-radius: 6px;
+  padding: 6px 10px; font-size: 12px; color: var(--muted); pointer-events: none; z-index: 2; }
+.map-wrap.drawing .maplibregl-canvas { cursor: crosshair; }
+.map-wrap.brushing .maplibregl-canvas { cursor: none; }

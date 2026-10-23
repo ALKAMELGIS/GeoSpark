@@ -1,41 +1,25 @@
-"""GeoTIFF inspection, display stretch, tile reading and web previews."""
+"""Raster reading: display stretch, inference tiles and exact Web Mercator map tiles."""
 
 from __future__ import annotations
 
+import math
+
+import cv2
 import numpy as np
 import rasterio
-from PIL import Image
 from rasterio.enums import Resampling
+from rasterio.transform import from_bounds
 from rasterio.vrt import WarpedVRT
-from rasterio.warp import transform_bounds
+from rasterio.warp import calculate_default_transform
 from rasterio.windows import Window
+
+WEB_MERCATOR = "EPSG:3857"
+ORIGIN = 20037508.342789244  # half the Web Mercator world width, metres
+TILE = 256
 
 
 def default_bands(count: int) -> list[int]:
     return [1, 2, 3] if count >= 3 else [1, 1, 1]
-
-
-def inspect(path) -> dict:
-    with rasterio.open(path) as ds:
-        if ds.crs is None:
-            raise ValueError("Raster is not georeferenced (no CRS).")
-        bounds_wgs84 = transform_bounds(ds.crs, "EPSG:4326", *ds.bounds, densify_pts=21)
-        return {
-            "driver": ds.driver,
-            "width": ds.width,
-            "height": ds.height,
-            "count": ds.count,
-            "dtype": ds.dtypes[0],
-            "crs": ds.crs.to_string(),
-            "epsg": ds.crs.to_epsg(),
-            "is_geographic": ds.crs.is_geographic,
-            "res": list(ds.res),
-            "nodata": ds.nodata,
-            "bounds": list(ds.bounds),
-            "bounds_wgs84": list(bounds_wgs84),
-            "default_bands": default_bands(ds.count),
-            "band_descriptions": [d or f"Band {i + 1}" for i, d in enumerate(ds.descriptions)],
-        }
 
 
 def compute_stretch(ds, bands: list[int], lo_pct=2.0, hi_pct=98.0) -> list[tuple[float, float]]:
@@ -58,9 +42,9 @@ def compute_stretch(ds, bands: list[int], lo_pct=2.0, hi_pct=98.0) -> list[tuple
     return out
 
 
-def to_uint8(arr: np.ndarray, stretch: list[tuple[float, float]]) -> np.ndarray:
+def to_uint8(arr: np.ndarray, stretch) -> np.ndarray:
     """(bands, H, W) array → (H, W, bands) uint8 using per-band ranges."""
-    if arr.dtype == np.uint8 and all(s == (0.0, 255.0) for s in stretch):
+    if arr.dtype == np.uint8 and all(tuple(s) == (0.0, 255.0) for s in stretch):
         return np.ascontiguousarray(np.moveaxis(arr, 0, -1))
     out = np.empty(arr.shape[1:] + (arr.shape[0],), dtype=np.uint8)
     for i, (lo, hi) in enumerate(stretch):
@@ -81,24 +65,64 @@ def read_rgb(ds, col_off: int, row_off: int, size: int, bands, stretch, out_size
     return to_uint8(arr, stretch), valid
 
 
-def render_preview(path, out_png, max_size: int = 2048, bands=None) -> list[list[float]]:
-    """Warp the raster to Web Mercator, write an RGBA PNG and return its four
-    lon/lat corners (TL, TR, BR, BL) for a MapLibre image source."""
-    from pyproj import Transformer
+# ---------------------------------------------------------------- Web Mercator tiles
 
+def tile_bounds(z: int, x: int, y: int) -> tuple[float, float, float, float]:
+    """(left, bottom, right, top) of an XYZ tile in EPSG:3857 metres."""
+    size = 2 * ORIGIN / (1 << z)
+    left = -ORIGIN + x * size
+    top = ORIGIN - y * size
+    return left, top - size, left + size, top
+
+
+def mercator_resolution(ds) -> float:
+    """Native pixel size of the raster once projected to Web Mercator (metres/pixel)."""
+    transform, _, _ = calculate_default_transform(ds.crs, WEB_MERCATOR, ds.width, ds.height, *ds.bounds)
+    return abs(transform.a)
+
+
+def zoom_range(ds) -> tuple[int, int]:
+    """(minzoom, maxzoom): maxzoom shows native pixels; minzoom shows the raster ~64 px wide."""
+    res = mercator_resolution(ds)
+    native = math.ceil(math.log2(2 * ORIGIN / (TILE * res)))
+    span = max(ds.width, ds.height)
+    minzoom = max(0, math.floor(native - math.log2(span / 64)))
+    return minzoom, min(max(native, 0), 24)
+
+
+def render_tile(path, z: int, x: int, y: int, bands, stretch, size: int = TILE) -> bytes | None:
+    """Render one XYZ tile as RGBA PNG, or None when the tile holds no data.
+
+    The warped VRT is defined on exactly the tile's bounds, so the output is placed by
+    the tile grid with no rounding; GDAL reads the source overviews for low zooms.
+    """
+    left, bottom, right, top = tile_bounds(z, x, y)
     with rasterio.open(path) as src:
-        bands = bands or default_bands(src.count)
-        stretch = compute_stretch(src, bands)
-        with WarpedVRT(src, crs="EPSG:3857", resampling=Resampling.bilinear) as vrt:
-            scale = max(vrt.width, vrt.height) / max_size
-            scale = max(scale, 1.0)
-            h, w = max(1, int(vrt.height / scale)), max(1, int(vrt.width / scale))
-            arr = vrt.read(bands, out_shape=(len(bands), h, w), resampling=Resampling.bilinear)
-            mask = vrt.read_masks(1, out_shape=(h, w), resampling=Resampling.nearest)
-            left, bottom, right, top = vrt.bounds
+        res = mercator_resolution(src)
+        n = int(min(max(size, round((right - left) / res)), size * 512))
+        transform = from_bounds(left, bottom, right, top, n, n)
+        # without nodata, a destination alpha band is what marks the area outside the raster
+        add_alpha = src.nodata is None
+        with WarpedVRT(src, crs=WEB_MERCATOR, transform=transform, width=n, height=n,
+                       resampling=Resampling.bilinear, add_alpha=add_alpha) as vrt:
+            mask = vrt.read_masks(1, out_shape=(size, size), resampling=Resampling.nearest)
+            if not mask.any():
+                return None
+            arr = vrt.read(bands, out_shape=(len(bands), size, size), resampling=Resampling.bilinear)
     rgb = to_uint8(arr, stretch)
-    rgba = np.dstack([rgb, mask.astype(np.uint8)])
-    Image.fromarray(rgba, "RGBA").save(out_png, optimize=True)
-    t = Transformer.from_crs("EPSG:3857", "EPSG:4326", always_xy=True)
-    corners = [(left, top), (right, top), (right, bottom), (left, bottom)]
-    return [list(t.transform(x, y)) for x, y in corners]
+    bgra = np.dstack([rgb[..., ::-1], mask.astype(np.uint8)])
+    ok, buf = cv2.imencode(".png", bgra, [cv2.IMWRITE_PNG_COMPRESSION, 3])
+    return buf.tobytes()
+
+
+def build_overviews(path) -> list[int]:
+    """Add internal overviews (factors 2, 4, 8, …) so low-zoom tiles read little data."""
+    with rasterio.open(path, "r+") as ds:
+        factors, f = [], 2
+        while max(ds.width, ds.height) / f > TILE:
+            factors.append(f)
+            f *= 2
+        if factors and not ds.overviews(1):
+            ds.build_overviews(factors, Resampling.average)
+            ds.update_tags(ns="rio_overview", resampling="average")
+        return factors

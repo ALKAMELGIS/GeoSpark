@@ -63,6 +63,41 @@ GeoTIFF ──► raster.py  (metadata, band selection, percentile stretch → u
   a **Resample ×** parameter (`scale`) now zooms imagery before inference.
 - The embedded ONNX metadata declares **AGPL-3.0** for the weights (the repository code itself is MIT).
 
+### Phase 1.5 — Projection fix & label annotation ✅
+
+**Projection review (GeoTIFF vs basemap).** The overlay used one 2048 px preview image as a MapLibre image
+source. That loses accuracy in two ways: large rasters are resampled, and MapLibre rounds image corners to
+1/8192 of the covering tile. Measured error: 0.2 m on a 600 m raster, **7.7 m on a 25 km raster** (more than
+one 5 m pixel), and worse when a raster straddles a low-zoom tile boundary. Detections and labels are exact
+vectors, so they visibly drifted off the imagery.
+
+Fix:
+- `raster.render_tile`: exact XYZ tiles. A WarpedVRT is defined on each tile's own bounds, so placement follows
+  the tile grid with no rounding. Native resolution, cached, low zooms served from overviews. A regression test
+  checks that a marked pixel lands within 1.5 tile pixels of its true Web Mercator position.
+- `georef.ingest`: uploads accept sidecars (`.tfw/.jgw/.wld`, `.prj`, `.aux.xml`, `.ovr`); GCP-only images
+  are warped to a grid; non-GeoTIFF or striped large files become tiled GeoTIFFs; overviews are built.
+- `georef.diagnose`: flags a missing CRS, degrees labelled as a projected CRS (and the reverse), UTM eastings
+  outside the zone, wrong hemisphere, rotated transforms, ±85° Mercator limits, and the accuracy of local-datum
+  → WGS 84 transformations (e.g. Nahrwan 1967, Karbala 1979).
+- `POST /api/rasters/{id}/crs`: assign or correct a CRS (reinterprets coordinates, clears the tile cache).
+
+**Label annotation** (`geoai/annotations.py`, `frontend/annotate.js`). Geometry is stored in raster pixel
+coordinates. The client converts pixel ↔ lon/lat with cubic polynomials fitted to PROJ control points
+(round-trip error ~1e-6 px).
+
+| Task mode | Tools | Exports |
+|---|---|---|
+| Object Detection | Bounding box, Point | YOLO detect, YOLO OBB, COCO |
+| Instance Segmentation | Polygon, Freehand, Bounding box | YOLO-seg, COCO polygons |
+| Semantic Segmentation | Brush, Eraser, Polygon fill, Freehand fill | Class-index PNG chips (palette), full GeoTIFF mask |
+
+Common to all: classes (create, rename, recolour, delete, hotkeys 1–9), select, move, resize, vertex edit
+(drag, insert from midpoints, Alt+click to delete), undo/redo, copy/paste/duplicate, autosave with version
+check, GeoJSON export, import from GeoJSON / YOLO / COCO, and **auto annotation**: run any installed model
+on the current view or the whole image and turn its results into editable labels. Semantic masks preview as
+server-rendered tiles, so the eraser shows exactly.
+
 ### Phase 2 — Tree detection & building segmentation
 - Register TreeSensing-style tree model and keremberke building-seg model (`scripts/export_models.py`).
 - Automatic GSD-aware resampling: pick `scale` from the raster resolution and each model's training GSD

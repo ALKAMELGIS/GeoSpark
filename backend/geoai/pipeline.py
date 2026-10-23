@@ -36,6 +36,7 @@ class DetectionParams:
     # >1 zooms in (each model pixel covers 1/scale raster pixels); use when objects look
     # smaller than in the training data, e.g. coarse imagery or downsampled exports.
     scale: float = 1.0
+    window: list[float] | None = None  # [x0, y0, x1, y1] raster pixels: process only this area
 
 
 def _drop_seam_cuts(det: Detections, col, row, tile, width, height, overlap_px) -> Detections:
@@ -73,6 +74,9 @@ def run_detection(raster_path, model: OnnxModel, params: DetectionParams, progre
         bands = params.bands or default_bands(ds.count)
         stretch = compute_stretch(ds, bands)
         grid = tile_grid(ds.width, ds.height, tile, params.overlap)
+        if params.window:
+            wx0, wy0, wx1, wy1 = params.window
+            grid = [(c, r) for c, r in grid if c < wx1 and c + tile > wx0 and r < wy1 and r + tile > wy0]
         parts, processed = [], 0
         for i, (col, row) in enumerate(grid):
             if cancelled and cancelled():
@@ -97,11 +101,14 @@ def run_detection(raster_path, model: OnnxModel, params: DetectionParams, progre
                         det.polygons = [p + (col, row) if p is not None else None for p in det.polygons]
                     parts.append(det)
             if progress:
-                progress((i + 1) / len(grid), f"Tile {i + 1}/{len(grid)}")
+                progress((i + 1) / max(len(grid), 1), f"Tile {i + 1}/{len(grid)}")
         merged = Detections.concat(parts)
         keep = nms(merged.boxes, merged.scores, merged.classes, params.iou, rotated=model.task == "obb",
                    class_agnostic=params.class_agnostic_nms)
         merged = merged.take(keep)
+        if params.window and len(merged):
+            cx, cy = merged.boxes[:, 0], merged.boxes[:, 1]
+            merged = merged.take(np.flatnonzero((cx >= wx0) & (cx < wx1) & (cy >= wy0) & (cy < wy1)))
         features = to_features(merged, model, ds.transform, ds.crs)
         meta_raster = {"width": ds.width, "height": ds.height, "crs": ds.crs.to_string(), "res": list(ds.res)}
 

@@ -10,6 +10,10 @@
 <body>
   <header class="topbar">
     <div class="brand"><span class="logo">◈</span> AI Platform <span class="muted">GeoAI</span></div>
+    <div class="segmented" role="tablist">
+      <button id="modeDetect" class="active" role="tab">Detect</button>
+      <button id="modeAnnotate" role="tab">Annotate</button>
+    </div>
     <div class="topbar-right">
       <label class="inline">Basemap
         <select id="basemap">
@@ -28,74 +32,167 @@
       <section class="card">
         <h2><span class="step">1</span> Imagery</h2>
         <label id="dropzone" class="dropzone">
-          <input id="rasterFile" type="file" accept=".tif,.tiff,.jp2,.img,.vrt" hidden />
+          <input id="rasterFile" type="file" multiple accept=".tif,.tiff,.jp2,.img,.jpg,.jpeg,.png,.tfw,.tifw,.jgw,.pgw,.wld,.prj,.xml,.ovr" hidden />
           <strong>Drop a GeoTIFF</strong> or click to browse
-          <small>Aerial / satellite imagery, any CRS</small>
+          <small>Add its .tfw / .prj / .aux.xml files too when the georeferencing is stored beside it</small>
         </label>
         <div id="uploadStatus" class="status"></div>
         <select id="rasterSelect"><option value="">— no imagery loaded —</option></select>
         <div id="rasterInfo" class="info"></div>
+        <div id="crsPanel" class="crs hidden">
+          <div id="crsInfo"></div>
+          <ul id="crsWarnings" class="warnings"></ul>
+          <form id="crsForm" class="crs-form">
+            <input id="crsInput" type="text" placeholder="EPSG code, e.g. 32638, or WKT" />
+            <button type="submit">Set CRS</button>
+          </form>
+        </div>
         <div id="bandRow" class="band-row hidden">
           <span>Bands</span>
           <select id="bandR"></select><select id="bandG"></select><select id="bandB"></select>
         </div>
-        <label class="slider-row">Overlay opacity <input id="opacity" type="range" min="0" max="1" step="0.05" value="1" /></label>
+        <label class="slider-row">Imagery opacity <input id="opacity" type="range" min="0" max="1" step="0.05" value="1" /></label>
       </section>
 
-      <section class="card">
-        <h2><span class="step">2</span> GeoAI model</h2>
-        <select id="modelSelect"></select>
-        <div id="modelInfo" class="info"></div>
-        <details>
-          <summary>Add custom ONNX model</summary>
-          <form id="modelForm" class="stack">
-            <input type="file" name="file" accept=".onnx" required />
-            <input type="text" name="name" placeholder="Display name (optional)" />
-            <select name="task">
-              <option value="">Task from model metadata</option>
-              <option value="obb">Oriented boxes (OBB)</option>
-              <option value="detect">Boxes (detect)</option>
-              <option value="segment">Instance segmentation</option>
-            </select>
-            <input type="text" name="names" placeholder="Class names, comma-separated (if not embedded)" />
-            <button type="submit">Register model</button>
+      <div id="detectPanel" class="panel-stack">
+        <section class="card">
+          <h2><span class="step">2</span> GeoAI model</h2>
+          <select id="modelSelect"></select>
+          <div id="modelInfo" class="info"></div>
+          <details>
+            <summary>Add custom ONNX model</summary>
+            <form id="modelForm" class="stack">
+              <input type="file" name="file" accept=".onnx" required />
+              <input type="text" name="name" placeholder="Display name (optional)" />
+              <select name="task">
+                <option value="">Task from model metadata</option>
+                <option value="obb">Oriented boxes (OBB)</option>
+                <option value="detect">Boxes (detect)</option>
+                <option value="segment">Instance segmentation</option>
+              </select>
+              <input type="text" name="names" placeholder="Class names, comma-separated (if not embedded)" />
+              <button type="submit">Register model</button>
+            </form>
+          </details>
+        </section>
+
+        <section class="card">
+          <h2><span class="step">3</span> Classes &amp; parameters</h2>
+          <div class="class-tools"><button class="link" id="allClasses">All</button> · <button class="link" id="noClasses">None</button></div>
+          <div id="classList" class="class-list"></div>
+          <label class="slider-row">Confidence <output id="confOut">0.25</output><input id="conf" type="range" min="0.05" max="0.95" step="0.05" value="0.25" /></label>
+          <label class="slider-row">NMS IoU <output id="iouOut">0.45</output><input id="iou" type="range" min="0.1" max="0.9" step="0.05" value="0.45" /></label>
+          <label class="slider-row">Tile overlap <output id="overlapOut">20%</output><input id="overlap" type="range" min="0" max="0.5" step="0.05" value="0.2" /></label>
+          <label class="slider-row" title="Zoom imagery before inference. Raise it when objects are smaller in your imagery than in the model's training data.">Resample <output id="scaleOut">1.0×</output><input id="scale" type="range" min="0.5" max="4" step="0.25" value="1" /></label>
+          <label class="check"><input id="agnostic" type="checkbox" /> Class-agnostic NMS</label>
+          <div class="run-row">
+            <button id="runBtn" class="primary" disabled>Run detection</button>
+            <button id="cancelBtn" class="ghost hidden">Cancel</button>
+          </div>
+          <div id="progressWrap" class="progress hidden"><div id="progressBar"></div></div>
+          <div id="jobStatus" class="status"></div>
+        </section>
+
+        <section class="card">
+          <h2><span class="step">4</span> Results</h2>
+          <div id="summary" class="summary muted">Run a model to create a detection layer.</div>
+          <div id="exportRow" class="export-row hidden">
+            <a id="exportGeojson" class="button">GeoJSON</a>
+            <a id="exportCsv" class="button">CSV (WKT)</a>
+            <button id="tableBtn" class="ghost">Attribute table</button>
+          </div>
+          <h3>History</h3>
+          <ul id="jobList" class="job-list"></ul>
+        </section>
+      </div>
+
+      <div id="annotatePanel" class="panel-stack hidden">
+        <section class="card">
+          <h2><span class="step">2</span> Annotation task</h2>
+          <div class="segmented wide" id="taskSwitch">
+            <button data-task="detection" title="Bounding boxes and points — YOLO / COCO detection">Object Detection</button>
+            <button data-task="instance" title="Polygons and freehand outlines — YOLO-seg / COCO">Instance Seg.</button>
+            <button data-task="semantic" title="Paint pixels by class — class-index masks">Semantic Seg.</button>
+          </div>
+          <div id="taskHint" class="info"></div>
+          <div id="annStatus" class="status"></div>
+        </section>
+
+        <section class="card">
+          <h2><span class="step">3</span> Classes</h2>
+          <ul id="annClasses" class="ann-classes"></ul>
+          <form id="classForm" class="class-form">
+            <input id="classColor" type="color" value="#3fb68b" title="Class colour" />
+            <input id="className" type="text" placeholder="New class name, e.g. Tree" maxlength="80" />
+            <button type="submit">Add</button>
           </form>
-        </details>
-      </section>
+          <button id="presetClasses" class="link">+ Tree, Building, Water, Bare Soil</button>
+        </section>
 
-      <section class="card">
-        <h2><span class="step">3</span> Classes &amp; parameters</h2>
-        <div class="class-tools"><button class="link" id="allClasses">All</button> · <button class="link" id="noClasses">None</button></div>
-        <div id="classList" class="class-list"></div>
-        <label class="slider-row">Confidence <output id="confOut">0.25</output><input id="conf" type="range" min="0.05" max="0.95" step="0.05" value="0.25" /></label>
-        <label class="slider-row">NMS IoU <output id="iouOut">0.45</output><input id="iou" type="range" min="0.1" max="0.9" step="0.05" value="0.45" /></label>
-        <label class="slider-row">Tile overlap <output id="overlapOut">20%</output><input id="overlap" type="range" min="0" max="0.5" step="0.05" value="0.2" /></label>
-        <label class="slider-row" title="Zoom imagery before inference. Raise it when objects are smaller in your imagery than in the model's training data.">Resample <output id="scaleOut">1.0×</output><input id="scale" type="range" min="0.5" max="4" step="0.25" value="1" /></label>
-        <label class="check"><input id="agnostic" type="checkbox" /> Class-agnostic NMS</label>
-        <div class="run-row">
-          <button id="runBtn" class="primary" disabled>Run detection</button>
-          <button id="cancelBtn" class="ghost hidden">Cancel</button>
-        </div>
-        <div id="progressWrap" class="progress hidden"><div id="progressBar"></div></div>
-        <div id="jobStatus" class="status"></div>
-      </section>
+        <section class="card">
+          <h2><span class="step">4</span> Auto annotation</h2>
+          <select id="autoModel"></select>
+          <label class="slider-row">Min score <output id="autoConfOut">0.35</output><input id="autoConf" type="range" min="0.05" max="0.95" step="0.05" value="0.35" /></label>
+          <label class="slider-row">Resample <output id="autoScaleOut">1.0×</output><input id="autoScale" type="range" min="0.5" max="4" step="0.25" value="1" /></label>
+          <div class="radio-row">
+            <label><input type="radio" name="autoRegion" value="view" checked /> Current view</label>
+            <label><input type="radio" name="autoRegion" value="all" /> Whole image</label>
+          </div>
+          <label class="check"><input id="autoReplace" type="checkbox" checked /> Replace previous auto labels</label>
+          <button id="autoRun" class="primary">Suggest labels</button>
+          <div id="autoStatus" class="status"></div>
+        </section>
 
-      <section class="card">
-        <h2><span class="step">4</span> Results</h2>
-        <div id="summary" class="summary muted">Run a model to create a detection layer.</div>
-        <div id="exportRow" class="export-row hidden">
-          <a id="exportGeojson" class="button">GeoJSON</a>
-          <a id="exportCsv" class="button">CSV (WKT)</a>
-          <button id="tableBtn" class="ghost">Attribute table</button>
-        </div>
-        <label class="check hidden" id="labelRow"><input id="showLabels" type="checkbox" /> Show labels</label>
-        <h3>History</h3>
-        <ul id="jobList" class="job-list"></ul>
-      </section>
+        <section class="card">
+          <h2><span class="step">5</span> Import / export</h2>
+          <select id="exportFormat">
+            <option value="yolo-detect">YOLO detection (boxes)</option>
+            <option value="yolo-obb">YOLO OBB (rotated boxes)</option>
+            <option value="yolo-seg">YOLO segmentation (polygons)</option>
+            <option value="coco">COCO (boxes + polygons)</option>
+            <option value="semantic">Semantic masks (PNG chips)</option>
+            <option value="mask-geotiff">Semantic mask (GeoTIFF, full image)</option>
+            <option value="geojson">GeoJSON (georeferenced)</option>
+          </select>
+          <div class="grid-2">
+            <label class="mini">Chip px <input id="chipSize" type="number" min="64" max="4096" step="32" value="640" /></label>
+            <label class="mini">Overlap <input id="chipOverlap" type="number" min="0" max="0.5" step="0.05" value="0.1" /></label>
+            <label class="mini">Val split <input id="valRatio" type="number" min="0" max="0.9" step="0.05" value="0.2" /></label>
+            <label class="mini">Image <select id="imgFormat"><option>jpg</option><option>png</option></select></label>
+          </div>
+          <label class="check"><input id="includeEmpty" type="checkbox" /> Include chips without labels</label>
+          <button id="exportBtn">Download dataset</button>
+          <details>
+            <summary>Import labels (GeoJSON, YOLO .txt, COCO .json)</summary>
+            <form id="importForm" class="stack">
+              <input type="file" name="file" accept=".geojson,.json,.txt" required />
+              <input type="text" name="names" placeholder="YOLO class names, comma-separated" />
+              <button type="submit">Import</button>
+            </form>
+          </details>
+          <div id="ioStatus" class="status"></div>
+        </section>
+      </div>
     </aside>
 
     <div class="map-wrap">
       <div id="map"></div>
+      <div id="annToolbar" class="ann-toolbar hidden">
+        <div id="toolButtons" class="tool-group"></div>
+        <div class="tool-group">
+          <button data-act="undo" title="Undo (Ctrl+Z)">↶</button>
+          <button data-act="redo" title="Redo (Ctrl+Y)">↷</button>
+          <button data-act="copy" title="Copy (Ctrl+C)">⧉</button>
+          <button data-act="paste" title="Paste (Ctrl+V)">📋</button>
+          <button data-act="duplicate" title="Duplicate (Ctrl+D)">⊕</button>
+          <button data-act="delete" title="Delete (Del)">🗑</button>
+        </div>
+        <label id="brushRow" class="tool-group brush hidden" title="Brush size in image pixels ([ and ])">
+          ● <input id="brushSize" type="range" min="2" max="200" step="1" value="24" /><output id="brushOut">24px</output>
+        </label>
+        <span id="saveState" class="save-state">Saved</span>
+      </div>
+      <div id="annHelp" class="ann-help hidden"></div>
       <div id="tablePanel" class="table-panel hidden">
         <div class="table-head"><strong>Attributes</strong> <span id="tableCount" class="muted"></span><button id="closeTable" class="ghost">✕</button></div>
         <div class="table-scroll"><table id="attrTable"></table></div>
@@ -108,7 +205,7 @@
     <p>This platform runs third-party AI models locally with <a href="https://onnxruntime.ai/" target="_blank">ONNX Runtime</a>. Each model, framework and dataset keeps its own license.</p>
     <ul>
       <li><b>Ultralytics YOLO</b> — AGPL-3.0 (enterprise licensing for closed commercial use).</li>
-      <li><b>YOLO26-DOTA-v2</b> by JustinVladut — MIT. <b>DOTA</b> dataset — academic-use terms.</li>
+      <li><b>YOLO26-DOTA-v2</b> by JustinVladut — code MIT, weights AGPL-3.0. <b>DOTA</b> dataset — academic-use terms.</li>
       <li><b>TreeSensing</b> by flyingvaibhav — no license declared; obtain permission before use.</li>
       <li><b>YOLOv8n building segmentation</b> by keremberke — verify model-card terms.</li>
       <li><b>SAM 2</b> — Apache-2.0. <b>SAM 3</b> — Meta SAM License.</li>
@@ -120,5 +217,6 @@
 
   <script src="vendor/maplibre-gl/maplibre-gl.js"></script>
   <script src="app.js"></script>
+  <script src="annotate.js"></script>
 </body>
 </html>

@@ -65,17 +65,72 @@ $("basemap").addEventListener("change", async (e) => {
   for (const id of ["esri", "osm"]) map.setLayoutProperty(id, "visibility", e.target.value === id ? "visible" : "none");
 });
 
+function bandKey() {
+  const r = state.raster;
+  if (!r || r.count < 2) return r ? r.default_bands.join("-") : "1-2-3";
+  return [$("bandR").value, $("bandG").value, $("bandB").value].join("-");
+}
+
+function rasterTilesUrl(r) {
+  return `${location.origin}/api/rasters/${r.id}/tiles/{z}/{x}/{y}.png?bands=${bandKey()}`;
+}
+
+// First overlay layer: imagery is inserted below it so vectors always draw on top.
+function overlayAnchor() {
+  return ["det-fill", "ann-mask", "ann-fill"].find((id) => map.getLayer(id));
+}
+
+// The imagery is served as exact Web Mercator XYZ tiles rendered from the GeoTIFF at native
+// resolution. (A single image overlay loses accuracy: it is resampled, and MapLibre snaps its
+// corners to 1/8192 of the covering tile, shifting it by metres against the basemap.)
 async function showRaster(r) {
   await mapReady;
-  if (map.getLayer("raster")) map.removeLayer("raster");
-  if (map.getSource("raster")) map.removeSource("raster");
-  if (!r) return;
-  map.addSource("raster", { type: "image", url: `/api/rasters/${r.id}/preview.png`, coordinates: r.preview_corners });
-  map.addLayer({ id: "raster", type: "raster", source: "raster", paint: { "raster-opacity": +$("opacity").value, "raster-fade-duration": 0 } },
-    map.getLayer("det-fill") ? "det-fill" : undefined);
+  for (const id of ["raster", "raster-footprint"]) if (map.getLayer(id)) map.removeLayer(id);
+  for (const id of ["raster", "raster-footprint"]) if (map.getSource(id)) map.removeSource(id);
+  if (!r || r.status !== "ready") return;
+  map.addSource("raster", { type: "raster", tiles: [rasterTilesUrl(r)], tileSize: 256, bounds: r.bounds_wgs84,
+    minzoom: r.minzoom, maxzoom: r.maxzoom, attribution: esc(r.name) });
+  map.addLayer({ id: "raster", type: "raster", source: "raster",
+    paint: { "raster-opacity": +$("opacity").value, "raster-fade-duration": 0, "raster-resampling": "nearest" } }, overlayAnchor());
+  map.addSource("raster-footprint", { type: "geojson",
+    data: { type: "Feature", properties: {}, geometry: { type: "Polygon", coordinates: [r.footprint] } } });
+  map.addLayer({ id: "raster-footprint", type: "line", source: "raster-footprint",
+    paint: { "line-color": "#f2b84b", "line-width": 1.5, "line-dasharray": [3, 2] } }, overlayAnchor());
   const [w, s, e, n] = r.bounds_wgs84;
   map.fitBounds([[w, s], [e, n]], { padding: 40, duration: 600 });
 }
+
+for (const id of ["bandR", "bandG", "bandB"]) {
+  $(id).addEventListener("change", () => state.raster && map.getSource("raster") && map.getSource("raster").setTiles([rasterTilesUrl(state.raster)]));
+}
+
+function renderCrs(r) {
+  const panel = $("crsPanel");
+  if (!r) { panel.classList.add("hidden"); return; }
+  panel.classList.remove("hidden");
+  const c = r.crs_info;
+  $("crsInfo").innerHTML = c
+    ? `<b>${esc(c.name)}</b>${c.epsg ? ` · EPSG:${c.epsg}` : ""}<br>Datum ${esc(c.datum || "?")} · ${esc(c.type)} · ${esc(c.units || "")}`
+    : "<b>No CRS</b>";
+  $("crsWarnings").innerHTML = (r.warnings || []).map((w) => `<li class="${esc(w.level)}">${esc(w.message)}</li>`).join("");
+  $("crsForm").classList.toggle("hidden", !(r.status !== "ready" || (r.warnings || []).some((w) => w.level !== "info") || panel.dataset.edit));
+}
+
+$("crsInfo").addEventListener("dblclick", () => { $("crsPanel").dataset.edit = "1"; renderCrs(state.raster); });
+
+$("crsForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const crs = $("crsInput").value.trim();
+  if (!crs || !state.raster) return;
+  try {
+    const r = await api(`/api/rasters/${state.raster.id}/crs`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ crs }) });
+    $("crsInput").value = "";
+    delete $("crsPanel").dataset.edit;
+    await loadRasters(r.id);
+  } catch (err) {
+    alert(err.message);
+  }
+});
 
 $("opacity").addEventListener("input", (e) => map.getLayer("raster") && map.setPaintProperty("raster", "raster-opacity", +e.target.value));
 
@@ -209,13 +264,13 @@ function fmtRes(r) {
 function selectRaster(id) {
   const r = state.rasters.find((x) => x.id === id) || null;
   state.raster = r;
-  showRaster(r);
   clearDetections();
   const info = $("rasterInfo");
   const bandRow = $("bandRow");
-  if (!r) { info.innerHTML = ""; bandRow.classList.add("hidden"); updateRunButton(); renderJobs(); return; }
+  renderCrs(r);
+  if (!r) { info.innerHTML = ""; bandRow.classList.add("hidden"); showRaster(null); updateRunButton(); renderJobs(); notifyRaster(); return; }
   info.innerHTML = `<b>${r.width} × ${r.height}</b> px · ${r.count} band(s) · ${esc(r.dtype)}<br>
-    CRS <b>${esc(r.epsg ? "EPSG:" + r.epsg : r.crs)}</b> · ${fmtRes(r)} · ${(r.size_bytes / 1e6).toFixed(1)} MB`;
+    ${r.status === "ready" ? fmtRes(r) + " · " : ""}${(r.size_bytes / 1e6).toFixed(1)} MB${r.overviews?.length ? ` · ${r.overviews.length} overviews` : ""}`;
   for (const [k, sid] of [[0, "bandR"], [1, "bandG"], [2, "bandB"]]) {
     const s = $(sid);
     s.innerHTML = "";
@@ -223,20 +278,30 @@ function selectRaster(id) {
     s.value = r.default_bands[k];
   }
   bandRow.classList.toggle("hidden", r.count < 2);
+  showRaster(r);
   updateRunButton();
   renderJobs();
+  notifyRaster();
+}
+
+// Lets the annotation module react to raster changes without a hard dependency.
+function notifyRaster() {
+  document.dispatchEvent(new CustomEvent("raster-changed", { detail: state.raster }));
 }
 
 $("rasterSelect").addEventListener("change", (e) => selectRaster(e.target.value));
 
-async function uploadRaster(file) {
+async function uploadRaster(files) {
+  files = [...files];
+  if (!files.length) return;
   const st = $("uploadStatus");
-  setStatus(st, `Uploading ${file.name} (${(file.size / 1e6).toFixed(1)} MB)…`);
+  const mb = files.reduce((a, f) => a + f.size, 0) / 1e6;
+  setStatus(st, `Uploading ${files.map((f) => f.name).join(", ")} (${mb.toFixed(1)} MB) — building overviews…`);
   const fd = new FormData();
-  fd.append("file", file);
+  for (const f of files) fd.append("files", f);
   try {
     const r = await api("/api/rasters", { method: "POST", body: fd });
-    setStatus(st, "");
+    setStatus(st, r.status === "ready" ? "" : "Uploaded, but the CRS needs attention — see below.", r.status !== "ready");
     await loadRasters(r.id);
   } catch (err) {
     setStatus(st, err.message, true);
@@ -244,13 +309,13 @@ async function uploadRaster(file) {
 }
 
 const dz = $("dropzone");
-$("rasterFile").addEventListener("change", (e) => e.target.files[0] && uploadRaster(e.target.files[0]));
+$("rasterFile").addEventListener("change", (e) => { uploadRaster(e.target.files); e.target.value = ""; });
 dz.addEventListener("dragover", (e) => { e.preventDefault(); dz.classList.add("over"); });
 dz.addEventListener("dragleave", () => dz.classList.remove("over"));
 dz.addEventListener("drop", (e) => {
   e.preventDefault();
   dz.classList.remove("over");
-  if (e.dataTransfer.files[0]) uploadRaster(e.dataTransfer.files[0]);
+  uploadRaster(e.dataTransfer.files);
 });
 
 // ------------------------------------------------------------------ jobs
@@ -260,7 +325,7 @@ for (const [id, fmt] of [["conf", (v) => v.toFixed(2)], ["iou", (v) => v.toFixed
 }
 
 function updateRunButton() {
-  $("runBtn").disabled = !(state.raster && state.model && state.model.available) || !!state.poll;
+  $("runBtn").disabled = !(state.raster && state.raster.status === "ready" && state.model && state.model.available) || !!state.poll;
 }
 
 $("runBtn").addEventListener("click", async () => {
@@ -389,6 +454,26 @@ $("attrTable").addEventListener("click", (e) => {
 $("tableBtn").addEventListener("click", () => $("tablePanel").classList.toggle("hidden"));
 $("closeTable").addEventListener("click", () => $("tablePanel").classList.add("hidden"));
 $("aboutBtn").addEventListener("click", () => $("about").showModal());
+
+// ------------------------------------------------------------------ modes
+
+state.mode = "detect";
+
+function setMode(mode) {
+  state.mode = mode;
+  $("modeDetect").classList.toggle("active", mode === "detect");
+  $("modeAnnotate").classList.toggle("active", mode === "annotate");
+  $("detectPanel").classList.toggle("hidden", mode !== "detect");
+  $("annotatePanel").classList.toggle("hidden", mode !== "annotate");
+  for (const id of ["det-fill", "det-line", "det-hl"]) {
+    if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", mode === "detect" ? "visible" : "none");
+  }
+  if (mode !== "detect") $("tablePanel").classList.add("hidden");
+  document.dispatchEvent(new CustomEvent("mode-changed", { detail: mode }));
+}
+
+$("modeDetect").addEventListener("click", () => setMode("detect"));
+$("modeAnnotate").addEventListener("click", () => setMode("annotate"));
 
 // ------------------------------------------------------------------ boot
 

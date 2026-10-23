@@ -15,6 +15,8 @@ as a browser-based platform. See [docs/PHASES.md](docs/PHASES.md) for the analys
 | Tiled native-resolution inference, overlap handling, cross-tile rotated NMS, class selection, progress/cancel | ✅ Phase 1 |
 | Custom Ultralytics ONNX models (detect / obb / segment), auto-configured from metadata | ✅ Phase 1 |
 | GIS output: georeferenced polygons, geodesic area/length/width/heading, GeoJSON + CSV export | ✅ Phase 1 |
+| Exact Web Mercator tiles from GeoTIFF (native resolution, overviews), CRS diagnostics and repair, sidecar upload | ✅ Phase 1.5 |
+| Label annotation: detection / instance / semantic modes, editing, undo/redo, auto annotation, YOLO / COCO / mask / GeoJSON export, import | ✅ Phase 1.5 |
 | Tree detection, building segmentation (engine ready; model packaging + GSD resampling) | 🔜 Phase 2 |
 | SAM 2 point-prompt segmentation | 🔜 Phase 3 |
 | SAM 3 text-prompt segmentation (optional) | 🔜 Phase 4 |
@@ -50,9 +52,10 @@ You can also upload any Ultralytics-exported `.onnx` from the UI (**Add custom O
 ## Layout
 
 ```
-backend/geoai/   raster.py  tiling.py  models.py  postprocess.py  pipeline.py  jobs.py  api.py
+backend/geoai/   raster.py  georef.py  tiling.py  models.py  postprocess.py  pipeline.py  jobs.py
+                 annotations.py  api.py
 backend/tests/   unit + end-to-end tests (generated ONNX models, synthetic GeoTIFFs)
-frontend/        static MapLibre client (vendored, works offline)
+frontend/        static MapLibre client (vendored, works offline): app.js (detect), annotate.js (labelling)
 models/          registry.json + downloaded/exported .onnx files (git-ignored)
 scripts/         export_models.py, georef_image.py
 data/            uploaded rasters and job results (git-ignored)
@@ -64,9 +67,14 @@ data/            uploaded rasters and job results (git-ignored)
 |---|---|---|
 | GET | `/api/models` | Registry with availability, task, classes, license |
 | POST | `/api/models` | Upload custom ONNX (`file`, `name`, `task`, `names`) |
-| POST | `/api/rasters` | Upload GeoTIFF → metadata + Web-Mercator preview |
-| GET | `/api/rasters/{id}/preview.png` | Preview overlay |
-| POST | `/api/jobs` | `{raster_id, model_id, conf, iou, classes, overlap, bands, class_agnostic_nms}` |
+| POST | `/api/rasters` | Upload a raster (`files`: GeoTIFF + optional .tfw/.prj/.aux.xml) → metadata, CRS warnings |
+| GET | `/api/rasters/{id}/tiles/{z}/{x}/{y}.png?bands=1-2-3` | Exact Web Mercator tiles |
+| POST | `/api/rasters/{id}/crs` | Assign or correct the CRS (`{"crs": "EPSG:32638"}`) |
+| GET/PUT | `/api/rasters/{id}/annotations` | Label document (pixel coordinates, versioned) |
+| POST | `/api/rasters/{id}/annotations/export` | `{format: yolo-detect\|yolo-obb\|yolo-seg\|coco\|semantic\|mask-geotiff\|geojson, chip_size, …}` → ZIP |
+| POST | `/api/rasters/{id}/annotations/import` | GeoJSON, YOLO `.txt` or COCO `.json` |
+| POST | `/api/rasters/{id}/annotations/from-job` | Auto annotation from a detection job |
+| POST | `/api/jobs` | `{raster_id, model_id, conf, iou, classes, overlap, bands, scale, window, class_agnostic_nms}` |
 | GET | `/api/jobs/{id}` | Status / progress / summary |
 | POST | `/api/jobs/{id}/cancel` | Cancel |
 | GET | `/api/jobs/{id}/export?format=geojson\|csv` | Download results |
